@@ -1,6 +1,17 @@
 package main.java;
 
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.List;
+
+import org.junit.Test;
+
 import com.bitmovin.api.BitmovinApi;
+import com.bitmovin.api.encoding.AclEntry;
+import com.bitmovin.api.encoding.AclPermission;
 import com.bitmovin.api.encoding.EncodingOutput;
 import com.bitmovin.api.encoding.InputStream;
 import com.bitmovin.api.encoding.codecConfigurations.AACAudioConfig;
@@ -18,28 +29,26 @@ import com.bitmovin.api.encoding.status.Task;
 import com.bitmovin.api.enums.Status;
 import com.bitmovin.api.exceptions.BitmovinApiException;
 import com.bitmovin.api.http.RestException;
+import com.bitmovin.api.webhooks.Webhook;
+import com.bitmovin.api.webhooks.enums.WebhookHttpMethod;
+import com.bitmovin.api.webhooks.enums.WebhookType;
 import com.mashape.unirest.http.exceptions.UnirestException;
-import org.junit.Test;
-
-import java.io.IOException;
-import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.List;
 
 public class CreateEncodingWithMP4MuxingOnS3
 {
 
-    private static String ApiKey = "<MyApiKey>";
+    private static String ApiKey = "734ff214-f7d0-46b4-8e4e-f899ea82328d";
 
     private static CloudRegion cloudRegion = CloudRegion.AWS_US_EAST_1;
-    private static String HTTPS_INPUT_HOST = "frmaia.s3.amazonaws.com/"; // ex.: storage.googleapis.com/
-    private static String HTTPS_INPUT_PATH = "/path/to/video.mp4";
-    private static String S3_OUTPUT_ACCESSKEY = "<INSERT_YOUR_ACCESSKEY>";
-    private static String S3_OUTPUT_SECRET_KEY = "<INSERT_YOUR_SECRETKEY>";
-    private static String S3_OUTPUT_BUCKET_NAME = "frmaia.dev";
-    private static String OUTPUT_BASE_PATH = "/bitmovin/encoding-tests/test-20170609/" + new Date().getTime();
+    
+	private static String HTTPS_INPUT_HOST = "frmaia.s3.amazonaws.com/"; // ex.: storage.googleapis.com/
+	private static String HTTPS_INPUT_PATH = "/path/to/video.mp4";
+	private static String S3_OUTPUT_ACCESSKEY = "<INSERT_YOUR_ACCESSKEY>";
+	private static String S3_OUTPUT_SECRET_KEY = "<INSERT_YOUR_SECRETKEY>";
+	private static String S3_OUTPUT_BUCKET_NAME = "frmaia.dev";
+	private static String OUTPUT_BASE_PATH = "/bitmovin/encoding-tests/test-20170609/" + new Date().getTime();
+    
+    private static String NOTIFICATION_URL = "https://requestb.in/10mkqpp1";
 
     private static BitmovinApi bitmovinApi;
 
@@ -49,7 +58,7 @@ public class CreateEncodingWithMP4MuxingOnS3
         bitmovinApi = new BitmovinApi(ApiKey);
         bitmovinApi.setDebug(true);
         Encoding encoding = new Encoding();
-        encoding.setName("Encoding JAVA");
+        encoding.setName("2100_1 test");
         encoding.setCloudRegion(cloudRegion);
         encoding = bitmovinApi.encoding.create(encoding);
 
@@ -63,6 +72,11 @@ public class CreateEncodingWithMP4MuxingOnS3
         output.setBucketName(S3_OUTPUT_BUCKET_NAME);
         output = bitmovinApi.output.s3.create(output);
 
+        List<AclEntry> acl = new ArrayList<AclEntry>(1);
+        acl.add(new AclEntry(AclPermission.PUBLIC_READ));
+        output.setAcl(acl);
+        
+
         AACAudioConfig aacConfiguration = new AACAudioConfig();
         aacConfiguration.setBitrate(96000L);
         aacConfiguration.setRate(48000f);
@@ -72,30 +86,44 @@ public class CreateEncodingWithMP4MuxingOnS3
         videoConfiguration240p.setHeight(240);
         videoConfiguration240p.setBitrate(195000L);
         videoConfiguration240p.setMaxBitrate(235000L);
+        videoConfiguration240p.setMinGop(48);
+        videoConfiguration240p.setMaxGop(48);
         videoConfiguration240p.setProfile(ProfileH264.BASELINE);
         videoConfiguration240p = bitmovinApi.configuration.videoH264.create(videoConfiguration240p);
 
         H264VideoConfiguration videoConfiguration360p = new H264VideoConfiguration();
         videoConfiguration360p.setHeight(360);
         videoConfiguration360p.setMaxBitrate(750000L);
+        videoConfiguration360p.setMinGop(48);
+        videoConfiguration360p.setMaxGop(48);
+        videoConfiguration360p.setCrf(24f);
         videoConfiguration360p.setProfile(ProfileH264.MAIN);
         videoConfiguration360p = bitmovinApi.configuration.videoH264.create(videoConfiguration360p);
 
         H264VideoConfiguration videoConfiguration480p = new H264VideoConfiguration();
         videoConfiguration480p.setHeight(480);
         videoConfiguration480p.setMaxBitrate(1750000L);
+        videoConfiguration480p.setMinGop(48);
+        videoConfiguration480p.setMaxGop(48);        
+        videoConfiguration480p.setCrf(24f);
         videoConfiguration480p.setProfile(ProfileH264.MAIN);
         videoConfiguration480p = bitmovinApi.configuration.videoH264.create(videoConfiguration480p);
 
         H264VideoConfiguration videoConfiguration720p = new H264VideoConfiguration();
         videoConfiguration720p.setHeight(720);
         videoConfiguration720p.setMaxBitrate(3000000L);
+        videoConfiguration720p.setMinGop(48);
+        videoConfiguration720p.setMaxGop(48);
+        videoConfiguration720p.setCrf(24f);
         videoConfiguration720p.setProfile(ProfileH264.HIGH);
         videoConfiguration720p = bitmovinApi.configuration.videoH264.create(videoConfiguration720p);
 
         H264VideoConfiguration videoConfiguration1080p = new H264VideoConfiguration();
         videoConfiguration1080p.setHeight(1080);
         videoConfiguration1080p.setMaxBitrate(4500000L);
+        videoConfiguration1080p.setMinGop(48);
+        videoConfiguration1080p.setMaxGop(48);
+        videoConfiguration1080p.setCrf(24f);
         videoConfiguration1080p.setProfile(ProfileH264.HIGH);
         videoConfiguration1080p = bitmovinApi.configuration.videoH264.create(videoConfiguration1080p);
 
@@ -152,6 +180,7 @@ public class CreateEncodingWithMP4MuxingOnS3
         this.createMP4Muxing(encoding, videoStream1080p, audioStream, encodingOutput, "output_1080.mp4");
 
         bitmovinApi.encoding.start(encoding);
+        this.createWebHook(encoding);
 
         Task status = bitmovinApi.encoding.getStatus(encoding);
 
@@ -164,6 +193,15 @@ public class CreateEncodingWithMP4MuxingOnS3
         System.out.println(String.format("Encoding finished with status %s", status.getStatus().toString()));
     }
 
+    private void createWebHook(Encoding encoding) throws URISyntaxException, BitmovinApiException, RestException, UnirestException, IOException
+    {
+        Webhook webhook = new Webhook();
+        webhook.setUrl(NOTIFICATION_URL);
+        webhook.setMethod(WebhookHttpMethod.POST);
+        bitmovinApi.notifications.webhooks.create(webhook, WebhookType.ENCODING_FINISHED, encoding.getId());
+        bitmovinApi.notifications.webhooks.create(webhook, WebhookType.ENCODING_ERROR, encoding.getId());
+    }
+    
     private void createMP4Muxing(Encoding encoding, Stream videoStream, Stream audioStream, EncodingOutput encodingOutput, String filename) throws BitmovinApiException, IOException, RestException, URISyntaxException, UnirestException
     {
         List<MuxingStream> muxingStreams = new ArrayList<>();
